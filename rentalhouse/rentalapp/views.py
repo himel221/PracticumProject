@@ -325,15 +325,24 @@ def book_property(request, property_id):
             booking = form.save(commit=False)
             booking.tenant = tenant
             booking.property = property_obj
-            
-            duration = form.cleaned_data.get('duration_months', 1)
-            booking.total_amount = property_obj.rent_amount * duration
+            # Compute duration (in months) from start and end dates
+            start_date = form.cleaned_data.get('start_date')
+            end_date = form.cleaned_data.get('end_date')
+
+            # Default to 1 month if dates not provided (should be validated earlier)
+            months = 1
+            if start_date and end_date:
+                days = (end_date - start_date).days
+                # approximate months as ceil(days / 30)
+                import math
+                months = max(1, math.ceil(days / 30))
+
+            booking.duration_months = months
+            booking.total_amount = property_obj.rent_amount * months
             booking.security_deposit = property_obj.security_deposit or property_obj.rent_amount
-            
+
             booking.save()
-            
-            property_obj.status = 'occupied'
-            property_obj.save()
+            booking.save()
             
             messages.success(request, 'Property booked successfully!')
             return redirect('tenant_dashboard')
@@ -373,25 +382,172 @@ def confirm_booking(request, booking_id):
 
 @login_required
 def cancel_booking(request, booking_id):
+    # Only accept POST requests for cancellation
+    if request.method != 'POST':
+        messages.error(request, 'Invalid request method.')
+        return redirect('home')
+
+    try:
+        booking = Bookings.objects.get(pk=booking_id)
+    except Bookings.DoesNotExist:
+        messages.error(request, 'Booking not found.')
+        return redirect('home')
+
+    # Determine if the requester is authorized (owner of property or the tenant)
+    user = request.user
+    redirect_target = 'home'
+    authorized = False
+
+    if user.user_type == 'owner' and hasattr(user, 'owner'):
+        if booking.property.owner.user == user:
+            authorized = True
+            redirect_target = 'owner_dashboard'
+
+    if user.user_type == 'tenant' and hasattr(user, 'tenant'):
+        if booking.tenant.user == user:
+            authorized = True
+            redirect_target = 'tenant_dashboard'
+
+    if not authorized:
+        messages.error(request, 'Booking not found or you do not have permission.')
+        return redirect('home')
+
+    if booking.booking_status == 'pending':
+        booking.booking_status = 'cancelled'
+        booking.save()
+        # If property was marked occupied by this booking, free it up
+        try:
+            prop = booking.property
+            if prop.status == 'occupied':
+                prop.status = 'available'
+                prop.save()
+        except Exception:
+            pass
+
+        messages.success(request, f'Booking #{booking.booking_id} has been cancelled.')
+    else:
+        messages.warning(request, 'This booking is already processed.')
+
+    return redirect(redirect_target)
+
+
+@login_required
+def confirm_payment(request, payment_id):
+    if request.method != 'POST':
+        messages.error(request, 'Invalid request method.')
+        return redirect('owner_payments')
+
     if request.user.user_type != 'owner':
         messages.error(request, 'Access denied.')
         return redirect('home')
-    
+
     try:
-        booking = get_object_or_404(Bookings, pk=booking_id, property__owner__user=request.user)
-        
-        if booking.booking_status == 'pending':
-            booking.booking_status = 'cancelled'
-            booking.save()
-            
-            messages.success(request, f'Booking #{booking.booking_id} has been cancelled.')
+        payment = get_object_or_404(Payments, pk=payment_id, owner__user=request.user)
+        if payment.payment_status != 'completed':
+            payment.payment_status = 'completed'
+            if not payment.payment_date:
+                from django.utils import timezone
+                payment.payment_date = timezone.now().date()
+            payment.save()
+            messages.success(request, f'Payment #{payment.payment_id} marked as received.')
         else:
-            messages.warning(request, 'This booking is already processed.')
-            
-    except Bookings.DoesNotExist:
-        messages.error(request, 'Booking not found or you do not have permission.')
-    
-    return redirect('owner_dashboard')
+            messages.info(request, 'Payment already marked as completed.')
+    except Payments.DoesNotExist:
+        messages.error(request, 'Payment not found or you do not have permission.')
+
+    return redirect('owner_payments')
+
+
+@login_required
+def export_payments_csv(request):
+    if request.user.user_type != 'owner':
+        messages.error(request, 'Access denied.')
+        return redirect('home')
+
+    owner = get_object_or_404(Owners, user=request.user)
+    payments = Payments.objects.filter(owner=owner).order_by('-created_at')
+
+    import csv
+    from django.http import HttpResponse
+
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="owner_payments.csv"'
+
+    writer = csv.writer(response)
+    writer.writerow(['Payment ID', 'Booking ID', 'Property', 'Tenant', 'Amount', 'Payment Date', 'Status'])
+
+    for p in payments:
+        writer.writerow([
+            p.payment_id,
+            getattr(p.booking, 'booking_id', ''),
+            getattr(p.booking.property, 'title', ''),
+            f"{p.tenant.user.first_name} {p.tenant.user.last_name}",
+            str(p.amount),
+            p.payment_date or '',
+            p.payment_status,
+        ])
+
+    return response
+
+
+@login_required
+def export_payments_pdf(request):
+    if request.user.user_type != 'owner':
+        messages.error(request, 'Access denied.')
+        return redirect('home')
+
+    owner = get_object_or_404(Owners, user=request.user)
+    payments = Payments.objects.filter(owner=owner).order_by('-created_at')
+
+    try:
+        # Use reportlab to generate PDF
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        import io
+
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4)
+        elements = []
+
+        styles = getSampleStyleSheet()
+        title = Paragraph(f"Payments Report - {owner.user.get_full_name()}", styles['Title'])
+        elements.append(title)
+        elements.append(Spacer(1, 12))
+
+        data = [['Payment ID', 'Booking ID', 'Property', 'Tenant', 'Amount', 'Payment Date', 'Status']]
+        for p in payments:
+            data.append([
+                str(p.payment_id),
+                str(getattr(p.booking, 'booking_id', '')),
+                getattr(p.booking.property, 'title', ''),
+                f"{p.tenant.user.first_name} {p.tenant.user.last_name}",
+                str(p.amount),
+                str(p.payment_date or ''),
+                p.payment_status,
+            ])
+
+        table = Table(data, repeatRows=1)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f0f0f0')),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('ALIGN', (4,1), (4,-1), 'RIGHT'),
+        ]))
+
+        elements.append(table)
+        doc.build(elements)
+
+        buffer.seek(0)
+        from django.http import HttpResponse
+        response = HttpResponse(buffer, content_type='application/pdf')
+        response['Content-Disposition'] = 'attachment; filename="owner_payments.pdf"'
+        return response
+
+    except ImportError:
+        messages.error(request, 'PDF export requires the "reportlab" package. Install it with: pip install reportlab')
+        return redirect('owner_payments')
 
 @login_required
 def make_payment(request, booking_id):
@@ -638,7 +794,8 @@ def owner_payments(request):
         'payments': payments,
         'owner': owner,
     }
-    return render(request, 'owner/owner_payments.html', context)
+    # Render the owner payments template (file at templates/owner_payments.html)
+    return render(request, 'owner_payments.html', context)
 
 @login_required
 def delete_message(request, message_id):

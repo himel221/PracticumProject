@@ -202,30 +202,26 @@ class PropertySearchForm(forms.Form):
 class BookingForm(forms.ModelForm):
     class Meta:
         model = Bookings
-        fields = ['start_date', 'end_date', 'duration_months', 'special_requests']
+        # duration_months is computed server-side from start/end dates
+        fields = ['start_date', 'end_date', 'special_requests']
         widgets = {
             'start_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
             'end_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
-            'duration_months': forms.NumberInput(attrs={'class': 'form-control', 'min': '1'}),
             'special_requests': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
         }
-    
+
     def clean(self):
         cleaned_data = super().clean()
         start_date = cleaned_data.get('start_date')
         end_date = cleaned_data.get('end_date')
-        duration_months = cleaned_data.get('duration_months')
-        
+
         if start_date and end_date:
             if start_date >= end_date:
                 raise ValidationError("End date must be after start date")
-            
+
             if start_date < timezone.now().date():
                 raise ValidationError("Start date cannot be in the past")
-        
-        if duration_months and duration_months < 1:
-            raise ValidationError("Duration must be at least 1 month")
-        
+
         return cleaned_data
 
 class PaymentForm(forms.ModelForm):

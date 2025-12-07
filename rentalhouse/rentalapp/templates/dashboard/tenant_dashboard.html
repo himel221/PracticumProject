@@ -149,6 +149,13 @@
                                                 <a href="{% url 'make_payment' booking.booking_id %}" class="btn btn-primary btn-sm">
                                                     <i class="fas fa-credit-card"></i> Make Payment
                                                 </a>
+                                            {% elif booking.booking_status == 'pending' %}
+                                                <form method="post" action="{% url 'cancel_booking' booking.booking_id %}" class="d-inline">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Are you sure you want to cancel this booking?')">
+                                                        <i class="fas fa-times"></i> Cancel
+                                                    </button>
+                                                </form>
                                             {% else %}
                                                 <span class="text-muted">Waiting for confirmation</span>
                                             {% endif %}

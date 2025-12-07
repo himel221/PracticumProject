@@ -49,4 +49,7 @@ path('messages/delete/<int:message_id>/', views.delete_message, name='delete_mes
     # Owner specific URLs
     path('owner/bookings/', views.owner_booking_list, name='owner_booking_list'),
     path('owner/payments/', views.owner_payments, name='owner_payments'),
+    path('owner/payment/confirm/<int:payment_id>/', views.confirm_payment, name='confirm_payment'),
+    path('owner/payments/export/', views.export_payments_csv, name='export_payments_csv'),
+    path('owner/payments/export/pdf/', views.export_payments_pdf, name='export_payments_pdf'),
 ]
