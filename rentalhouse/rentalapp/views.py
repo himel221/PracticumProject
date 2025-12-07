@@ -80,6 +80,11 @@ def tenant_dashboard(request):
     bookings = Bookings.objects.filter(tenant=tenant).order_by('-created_at')
     payments = Payments.objects.filter(tenant=tenant).order_by('-created_at')
     complaints = ComplaintsRequests.objects.filter(tenant=tenant).order_by('-created_at')
+
+    # Group complaints for easier display in template
+    complaints_open = complaints.filter(status='open')
+    complaints_in_progress = complaints.filter(status='in-progress')
+    complaints_resolved = complaints.filter(status='resolved')
     
     total_paid = payments.filter(payment_status='completed').aggregate(
         total=Sum('amount')
@@ -90,6 +95,9 @@ def tenant_dashboard(request):
         'bookings': bookings,
         'payments': payments,
         'complaints': complaints,
+        'complaints_open': complaints_open,
+        'complaints_in_progress': complaints_in_progress,
+        'complaints_resolved': complaints_resolved,
         'total_paid': total_paid,
     }
     return render(request, 'dashboard/tenant_dashboard.html', context)
@@ -635,7 +643,21 @@ def owner_complaints(request):
         return redirect('login')
     
     owner_properties = Properties.objects.filter(owner=owner)
-    complaints = ComplaintsRequests.objects.filter(property__in=owner_properties).order_by('-created_at')
+    # list of tenants who have complaints on owner's properties
+    tenants_with_complaints = Tenants.objects.filter(complaints__property__in=owner_properties).distinct()
+
+    # Optionally filter by tenant via GET parameter
+    tenant_id = request.GET.get('tenant_id')
+    if tenant_id:
+        try:
+            selected_tenant = Tenants.objects.get(tenant_id=tenant_id)
+            complaints = ComplaintsRequests.objects.filter(property__in=owner_properties, tenant=selected_tenant).order_by('-created_at')
+        except Tenants.DoesNotExist:
+            selected_tenant = None
+            complaints = ComplaintsRequests.objects.filter(property__in=owner_properties).order_by('-created_at')
+    else:
+        selected_tenant = None
+        complaints = ComplaintsRequests.objects.filter(property__in=owner_properties).order_by('-created_at')
     
     if request.method == 'POST' and 'complaint_id' in request.POST:
         complaint_id = request.POST.get('complaint_id')
@@ -677,6 +699,8 @@ def owner_complaints(request):
         'in_progress_complaints': in_progress_complaints,
         'resolved_complaints': resolved_complaints,
         'high_priority_complaints': high_priority_complaints,
+        'tenants_with_complaints': tenants_with_complaints,
+        'selected_tenant': selected_tenant,
     }
     
     return render(request, 'complaints/owner_complaints.html', context)

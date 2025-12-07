@@ -131,7 +131,8 @@ from pathlib import Path
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-Django_key = 'your-secret-key-here'  # Replace with your actual secret key
+#Django_key = 'your-secret-key-here'  # Replace with your actual secret key
+SECRET_KEY = 'django-insecure-pfiu_v!x#r#559lmuyzx2xazy$82ne($h*^otai3eb_1%h+&91'
 DEBUG = True
 ALLOWED_HOSTS = ['*']
 

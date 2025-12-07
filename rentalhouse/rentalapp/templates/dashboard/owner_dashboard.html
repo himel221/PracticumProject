@@ -41,13 +41,13 @@
                         </a>
                     </li>
                        <li class="nav-item">
-                <a class="nav-link" href="#">
-                    <i class="fas fa-exclamation-triangle"></i> Tenant Complaints
-                    {% if pending_complaints_count > 0 %}
-                    <span class="badge bg-danger float-end">{{ pending_complaints_count }}</span>
-                    {% endif %}
-                </a>
-            </li>
+                        <a class="nav-link" href="{% url 'owner_complaints' %}">
+                            <i class="fas fa-exclamation-triangle"></i> Tenant Complaints
+                            {% if pending_complaints_count > 0 %}
+                            <span class="badge bg-danger float-end">{{ pending_complaints_count }}</span>
+                            {% endif %}
+                        </a>
+                    </li>
                 </ul>
             </div>
         </div>
