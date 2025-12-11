@@ -100,14 +100,14 @@
                         <!-- Pricing Section -->
                         <div class="row">
                             <div class="col-md-4 mb-3">
-                                <label class="form-label">Rent Amount ($) *</label>
+                                <label class="form-label">Rent Amount (BDT) *</label>
                                 {{ form.rent_amount }}
                                 {% if form.rent_amount.errors %}
                                     <div class="text-danger small">{{ form.rent_amount.errors }}</div>
                                 {% endif %}
                             </div>
                             <div class="col-md-4 mb-3">
-                                <label class="form-label">Security Deposit ($)</label>
+                                <label class="form-label">Security Deposit (BDT)</label>
                                 {{ form.security_deposit }}
                                 {% if form.security_deposit.errors %}
                                     <div class="text-danger small">{{ form.security_deposit.errors }}</div>

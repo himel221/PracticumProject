@@ -43,14 +43,11 @@
                     {% if received_messages %}
                         <div class="list-group list-group-flush">
                             {% for message in received_messages %}
-                            <div class="list-group-item {% if not message.is_read %}bg-light{% endif %}">
+                            <div class="list-group-item">
                                 <div class="d-flex justify-content-between align-items-start">
                                     <div class="flex-grow-1">
                                         <h6 class="mb-1">
                                             {{ message.sender.first_name }} {{ message.sender.last_name }}
-                                            {% if not message.is_read %}
-                                            <span class="badge bg-primary">New</span>
-                                            {% endif %}
                                         </h6>
                                         <p class="mb-1 text-muted">{{ message.message_text|truncatewords:20 }}</p>
                                         <small class="text-muted">
@@ -124,9 +121,7 @@
                                             {% endif %}
                                         </small>
                                     </div>
-                                    <span class="badge bg-{% if message.is_read %}success{% else %}warning{% endif %}">
-                                        {% if message.is_read %}Read{% else %}Unread{% endif %}
-                                    </span>
+
                                 </div>
                             </div>
                             {% endfor %}

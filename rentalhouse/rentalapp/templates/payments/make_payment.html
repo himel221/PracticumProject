@@ -16,7 +16,7 @@
                         <h5>Booking #{{ booking.booking_id }}</h5>
                         <p class="mb-1"><strong>Property:</strong> {{ booking.property.title }}</p>
                         <p class="mb-1"><strong>Duration:</strong> {{ booking.start_date }} to {{ booking.end_date }}</p>
-                        <p class="mb-0"><strong>Total Amount:</strong> ${{ booking.total_amount }}</p>
+                        <p class="mb-0"><strong>Total Amount:</strong> BDT {{ booking.total_amount }}</p>
                     </div>
 
                     <form method="post">
@@ -24,7 +24,7 @@
                         
                         <div class="row">
                             <div class="col-md-6 mb-3">
-                                <label class="form-label">Amount ($) *</label>
+                                <label class="form-label">Amount (BDT) *</label>
                                 {{ form.amount }}
                             </div>
                             <div class="col-md-6 mb-3">

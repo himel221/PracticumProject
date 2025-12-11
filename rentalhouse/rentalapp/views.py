@@ -7,6 +7,24 @@ from django.utils import timezone
 from .form import *
 from .models import *
 
+# Helper function to create notifications
+def create_notification(user, notification_type, title, message_text, related_entity_type=None, related_entity_id=None):
+    """
+    Create a notification for a user.
+    notification_type: 'email', 'sms', or 'push'
+    """
+    try:
+        Notifications.objects.create(
+            user=user,
+            type=notification_type,
+            title=title,
+            message=message_text,
+            related_entity_type=related_entity_type,
+            related_entity_id=related_entity_id
+        )
+    except Exception as e:
+        print(f"Error creating notification: {str(e)}")
+
 def home(request):
     featured_properties = Properties.objects.filter(status='available')[:6]
     return render(request, 'home.html', {'featured_properties': featured_properties})
@@ -19,7 +37,7 @@ def user_register(request):
             user.set_password(form.cleaned_data['password'])
             user.save()
             
-            user_type = form.cleaned_data['user_type']
+            user_type = form.cleaned_data.get('user_type')
             if user_type == 'tenant':
                 Tenants.objects.create(user=user)
                 messages.success(request, 'Tenant account created successfully! Please login.')
@@ -34,6 +52,7 @@ def user_register(request):
         form = UserRegistrationForm()
     
     return render(request, 'auth/register.html', {'form': form})
+
 
 def user_login(request):
     if request.method == 'POST':
@@ -81,6 +100,43 @@ def tenant_dashboard(request):
     payments = Payments.objects.filter(tenant=tenant).order_by('-created_at')
     complaints = ComplaintsRequests.objects.filter(tenant=tenant).order_by('-created_at')
 
+    # Determine if a payment is currently due for each booking.
+    # Payment is considered not due if there is a completed payment whose next due date (one month later)
+    # is in the future. Otherwise a payment is due.
+    import calendar
+    from django.utils import timezone
+
+    today = timezone.now().date()
+    for b in bookings:
+        try:
+            # Prefer explicit pending payments created by the system (or by previous flows)
+            pending = Payments.objects.filter(booking=b, payment_status='pending').order_by('due_date').first()
+            if pending:
+                b.next_payment_due = pending.due_date
+                b.payment_due = (pending.due_date is not None and pending.due_date <= today)
+            else:
+                # Fallback: compute based on last completed payment (if any)
+                last_payment = Payments.objects.filter(booking=b, payment_status='completed').order_by('-payment_date').first()
+                if not last_payment or not last_payment.payment_date:
+                    b.payment_due = False
+                    b.next_payment_due = None
+                else:
+                    lp = last_payment.payment_date
+                    # add 1 calendar month
+                    month = lp.month + 1
+                    year = lp.year + (month - 1) // 12
+                    month = (month - 1) % 12 + 1
+                    day = min(lp.day, calendar.monthrange(year, month)[1])
+                    next_due = lp.replace(year=year, month=month, day=day)
+                    b.next_payment_due = next_due
+                    b.payment_due = (today >= next_due)
+        except Exception:
+            b.payment_due = True
+            b.next_payment_due = None
+
+    # convert back to QuerySet-like ordering in context
+    # (we already ordered above and then converted to list)
+
     # Group complaints for easier display in template
     complaints_open = complaints.filter(status='open')
     complaints_in_progress = complaints.filter(status='in-progress')
@@ -89,6 +145,11 @@ def tenant_dashboard(request):
     total_paid = payments.filter(payment_status='completed').aggregate(
         total=Sum('amount')
     )['total'] or 0
+    try:
+        # Show whole-number amount (BDT) to users
+        total_paid = int(round(float(total_paid)))
+    except Exception:
+        total_paid = 0
     
     context = {
         'tenant': tenant,
@@ -120,7 +181,10 @@ def owner_dashboard(request):
     total_earnings = payments.filter(payment_status='completed').aggregate(
         total=Sum('amount')
     )['total'] or 0
-    
+    try:
+        total_earnings = int(round(float(total_earnings)))
+    except Exception:
+        total_earnings = 0
     context = {
         'owner': owner,
         'properties': properties,
@@ -142,19 +206,19 @@ def admin_dashboard(request):
     total_properties = Properties.objects.count()
     total_bookings = Bookings.objects.count()
     total_payments = Payments.objects.count()
-    pending_complaints = ComplaintsRequests.objects.filter(status='open').count()
     
     recent_users = Users.objects.order_by('-created_at')[:5]
     recent_bookings = Bookings.objects.order_by('-created_at')[:5]
+    recent_properties = Properties.objects.order_by('-created_at')[:5]
     
     context = {
         'total_users': total_users,
         'total_properties': total_properties,
         'total_bookings': total_bookings,
         'total_payments': total_payments,
-        'pending_complaints': pending_complaints,
         'recent_users': recent_users,
         'recent_bookings': recent_bookings,
+        'recent_properties': recent_properties,
     }
     return render(request, 'dashboard/admin_dashboard.html', context)
 
@@ -336,21 +400,77 @@ def book_property(request, property_id):
             # Compute duration (in months) from start and end dates
             start_date = form.cleaned_data.get('start_date')
             end_date = form.cleaned_data.get('end_date')
+            # Default values
+            months = 0
+            total = 0
 
-            # Default to 1 month if dates not provided (should be validated earlier)
-            months = 1
-            if start_date and end_date:
+            if start_date and end_date and end_date > start_date:
+                # total number of days between dates
                 days = (end_date - start_date).days
-                # approximate months as ceil(days / 30)
-                import math
-                months = max(1, math.ceil(days / 30))
 
+                # If the rental is less than 30 days, charge day-wise (rent/30 per day)
+                if days < 30:
+                    per_day = float(property_obj.rent_amount) / 30.0
+                    total = round(per_day * max(1, days), 2)
+                    months = 0
+                else:
+                    # Compute calendar-aware year/month/day delta
+                    import calendar
+
+                    y = end_date.year - start_date.year
+                    m = end_date.month - start_date.month
+                    d = end_date.day - start_date.day
+
+                    if d < 0:
+                        # borrow days from the previous month of end_date
+                        prev_month = end_date.month - 1 if end_date.month > 1 else 12
+                        prev_year = end_date.year if end_date.month > 1 else end_date.year - 1
+                        days_in_prev_month = calendar.monthrange(prev_year, prev_month)[1]
+                        d += days_in_prev_month
+                        m -= 1
+
+                    if m < 0:
+                        m += 12
+                        y -= 1
+
+                    total_months = y * 12 + m
+                    if total_months < 1:
+                        total_months = 1
+
+                    # charge full months at rent and any leftover days prorated
+                    per_day = float(property_obj.rent_amount) / 30.0
+                    total = round(float(property_obj.rent_amount) * total_months + per_day * d, 2)
+                    months = total_months
+
+            # Persist computed values
             booking.duration_months = months
-            booking.total_amount = property_obj.rent_amount * months
+            booking.total_amount = total
             booking.security_deposit = property_obj.security_deposit or property_obj.rent_amount
 
             booking.save()
             booking.save()
+            
+            # Create notification for tenant (booking created) -- skip notifying the actor
+            if booking.tenant and booking.tenant.user != request.user:
+                create_notification(
+                    user=booking.tenant.user,
+                    notification_type='push',
+                    title='Booking Confirmed',
+                    message_text=f'Your booking for {property_obj.title} has been created. Awaiting owner approval.',
+                    related_entity_type='booking',
+                    related_entity_id=booking.booking_id
+                )
+
+            # Create notification for owner (new booking request) -- skip notifying the actor
+            if property_obj.owner and property_obj.owner.user != request.user:
+                create_notification(
+                    user=property_obj.owner.user,
+                    notification_type='push',
+                    title='New Booking Request',
+                    message_text=f'New booking request for {property_obj.title} from {request.user.first_name} {request.user.last_name}.',
+                    related_entity_type='booking',
+                    related_entity_id=booking.booking_id
+                )
             
             messages.success(request, 'Property booked successfully!')
             return redirect('tenant_dashboard')
@@ -378,15 +498,65 @@ def confirm_booking(request, booking_id):
             
             booking.property.status = 'occupied'
             booking.property.save()
+
+            # Create initial pending payment depending on booking length:
+            # - For short bookings (<30 days): create one prorated pending payment due at or before start_date
+            # - For longer bookings: schedule the first monthly pending payment one calendar month after start_date
+            try:
+                import calendar
+                from django.utils import timezone
+
+                today = timezone.now().date()
+                if not Payments.objects.filter(booking=booking).exists():
+                    total_days = (booking.end_date - booking.start_date).days
+                    if total_days < 30:
+                        per_day = float(booking.property.rent_amount) / 30.0
+                        amount = round(per_day * max(1, total_days), 2)
+                        due_date = booking.start_date if booking.start_date >= today else today
+                        Payments.objects.create(
+                            booking=booking,
+                            tenant=booking.tenant,
+                            owner=booking.property.owner,
+                            amount=amount,
+                            due_date=due_date,
+                            payment_status='pending'
+                        )
+                    else:
+                        # compute start_date + 1 calendar month
+                        sd = booking.start_date
+                        month = sd.month + 1
+                        year = sd.year + (month - 1) // 12
+                        month = (month - 1) % 12 + 1
+                        day = min(sd.day, calendar.monthrange(year, month)[1])
+                        first_due = sd.replace(year=year, month=month, day=day)
+                        if first_due <= booking.end_date:
+                            Payments.objects.create(
+                                booking=booking,
+                                tenant=booking.tenant,
+                                owner=booking.property.owner,
+                                amount=float(booking.property.rent_amount),
+                                due_date=first_due,
+                                payment_status='pending'
+                            )
+            except Exception:
+                pass
             
-            messages.success(request, f'Booking #{booking.booking_id} has been confirmed!')
-        else:
-            messages.warning(request, 'This booking is already processed.')
+            # Create notification for tenant (booking confirmed by owner) -- don't notify the actor
+            if booking.tenant and booking.tenant.user != request.user:
+                create_notification(
+                    user=booking.tenant.user,
+                    notification_type='push',
+                    title='Booking Confirmed',
+                    message_text=f'Your booking for {booking.property.title} has been confirmed by the owner!',
+                    related_entity_type='booking',
+                    related_entity_id=booking.booking_id
+                )
             
+            return redirect('owner_dashboard')
     except Bookings.DoesNotExist:
         messages.error(request, 'Booking not found or you do not have permission.')
-    
-    return redirect('owner_dashboard')
+        return redirect('owner_dashboard')
+
 
 @login_required
 def cancel_booking(request, booking_id):
@@ -431,6 +601,27 @@ def cancel_booking(request, booking_id):
                 prop.save()
         except Exception:
             pass
+        
+        # Create notification for both tenant and owner (booking cancelled) -- skip actor
+        cancelled_by = f"{user.first_name} {user.last_name}"
+        if booking.tenant and booking.tenant.user != request.user:
+            create_notification(
+                user=booking.tenant.user,
+                notification_type='push',
+                title='Booking Cancelled',
+                message_text=f'Booking for {booking.property.title} has been cancelled by {cancelled_by}.',
+                related_entity_type='booking',
+                related_entity_id=booking.booking_id
+            )
+        if booking.property and booking.property.owner and booking.property.owner.user != request.user:
+            create_notification(
+                user=booking.property.owner.user,
+                notification_type='push',
+                title='Booking Cancelled',
+                message_text=f'Booking for {booking.property.title} from {booking.tenant.user.first_name} has been cancelled.',
+                related_entity_type='booking',
+                related_entity_id=booking.booking_id
+            )
 
         messages.success(request, f'Booking #{booking.booking_id} has been cancelled.')
     else:
@@ -451,19 +642,73 @@ def confirm_payment(request, payment_id):
 
     try:
         payment = get_object_or_404(Payments, pk=payment_id, owner__user=request.user)
+        just_completed = False
         if payment.payment_status != 'completed':
-            payment.payment_status = 'completed'
-            if not payment.payment_date:
-                from django.utils import timezone
-                payment.payment_date = timezone.now().date()
-            payment.save()
-            messages.success(request, f'Payment #{payment.payment_id} marked as received.')
+            # Only allow owner to confirm if tenant has actually submitted payment details
+            if payment.payment_method or payment.transaction_id or payment.receipt_url:
+                payment.payment_status = 'completed'
+                if not payment.payment_date:
+                    from django.utils import timezone
+                    payment.payment_date = timezone.now().date()
+                payment.save()
+                just_completed = True
+                
+                # Create notification for tenant (payment confirmed by owner) -- skip actor
+                if payment.tenant and payment.tenant.user != request.user:
+                    create_notification(
+                        user=payment.tenant.user,
+                        notification_type='push',
+                        title='Payment Confirmed',
+                        message_text=f'Your payment of BDT {payment.amount} has been confirmed by the owner.',
+                        related_entity_type='payment',
+                        related_entity_id=payment.payment_id
+                    )
+                
+                messages.success(request, f'Payment #{payment.payment_id} marked as received.')
+            else:
+                messages.error(request, 'Tenant has not submitted payment details yet.')
         else:
             messages.info(request, 'Payment already marked as completed.')
+
+        # After owner confirms (marks completed), schedule next pending payment if booking still ongoing
+        if just_completed:
+            try:
+                import calendar
+                last_paid_date = payment.payment_date
+                if last_paid_date:
+                    month = last_paid_date.month + 1
+                    year = last_paid_date.year + (month - 1) // 12
+                    month = (month - 1) % 12 + 1
+                    day = min(last_paid_date.day, calendar.monthrange(year, month)[1])
+                    next_due = last_paid_date.replace(year=year, month=month, day=day)
+
+                    # Only create if next_due <= booking.end_date
+                    if next_due <= payment.booking.end_date:
+                        # determine amount for next cycle
+                        remaining_days = (payment.booking.end_date - next_due).days
+                        if remaining_days < 30:
+                            per_day = float(payment.booking.property.rent_amount) / 30.0
+                            amt = round(per_day * max(1, remaining_days), 2)
+                        else:
+                            amt = float(payment.booking.property.rent_amount)
+
+                        # create next pending payment only if none exists for that due date
+                        if not Payments.objects.filter(booking=payment.booking, due_date=next_due).exists():
+                            Payments.objects.create(
+                                booking=payment.booking,
+                                tenant=payment.tenant,
+                                owner=payment.owner,
+                                amount=amt,
+                                due_date=next_due,
+                                payment_status='pending'
+                            )
+            except Exception:
+                pass
     except Payments.DoesNotExist:
         messages.error(request, 'Payment not found or you do not have permission.')
 
     return redirect('owner_payments')
+
 
 
 @login_required
@@ -568,19 +813,53 @@ def make_payment(request, booking_id):
     owner = booking.property.owner
     
     if request.method == 'POST':
-        form = PaymentForm(request.POST)
+        # Prefer updating an existing pending payment
+        pending_payment = Payments.objects.filter(booking=booking, payment_status='pending').order_by('due_date').first()
+        if pending_payment:
+            form = PaymentForm(request.POST, instance=pending_payment)
+        else:
+            form = PaymentForm(request.POST)
+
         if form.is_valid():
             payment = form.save(commit=False)
             payment.booking = booking
             payment.tenant = tenant
             payment.owner = owner
+            # Tenant submitting payment: create or update a payment record in 'pending' state
+            payment.payment_status = 'pending'
+            # Do not record payment_date yet; owner will confirm and set payment_date
+            payment.payment_date = None
             payment.save()
             
-            messages.success(request, 'Payment submitted successfully!')
+            # Create notification for owner (tenant submitted payment) -- skip actor
+            if owner and owner.user != request.user:
+                create_notification(
+                    user=owner.user,
+                    notification_type='push',
+                    title='Payment Submitted',
+                    message_text=f'{tenant.user.first_name} has submitted a payment of BDT {payment.amount} for {booking.property.title}.',
+                    related_entity_type='payment',
+                    related_entity_id=payment.payment_id
+                )
+
+            messages.success(request, 'Payment submitted and awaiting owner confirmation.')
             return redirect('tenant_dashboard')
     else:
-        initial_data = {'amount': booking.property.rent_amount}
-        form = PaymentForm(initial=initial_data)
+        # Try to use existing pending payment for this booking
+        pending_payment = Payments.objects.filter(booking=booking, payment_status='pending').order_by('due_date').first()
+        if pending_payment:
+            initial_data = {'amount': pending_payment.amount, 'due_date': pending_payment.due_date}
+            form = PaymentForm(initial=initial_data)
+        else:
+            # fallback: compute immediate due amount (first month or prorated)
+            total_days = (booking.end_date - booking.start_date).days
+            if total_days < 30:
+                per_day = float(booking.property.rent_amount) / 30.0
+                amt = round(per_day * max(1, total_days), 2)
+            else:
+                amt = float(booking.property.rent_amount)
+            initial_data = {'amount': amt, 'due_date': max(timezone.now().date(), booking.start_date)}
+            form = PaymentForm(initial=initial_data)
     
     context = {
         'booking': booking,
@@ -617,6 +896,17 @@ def submit_complaint(request):
             complaint.tenant = tenant
             complaint.property = property_obj
             complaint.save()
+            
+            # Create notification for owner (complaint submitted) -- skip actor
+            if property_obj.owner and property_obj.owner.user != request.user:
+                create_notification(
+                    user=property_obj.owner.user,
+                    notification_type='push',
+                    title='New Complaint',
+                    message_text=f'{tenant.user.first_name} has submitted a complaint: {complaint.title}',
+                    related_entity_type='complaint',
+                    related_entity_id=complaint.complaint_id
+                )
             
             messages.success(request, 'Complaint submitted successfully!')
             return redirect('tenant_dashboard')
@@ -765,16 +1055,27 @@ def submit_review(request, booking_id):
 @login_required
 def send_message(request):
     if request.method == 'POST':
-        form = MessageForm(request.POST)
+        form = MessageForm(request.POST, user=request.user)
         if form.is_valid():
             message = form.save(commit=False)
             message.sender = request.user
             message.save()
             
+            # Create notification for receiver (new message received) -- skip actor
+            if message.receiver and message.receiver != request.user:
+                create_notification(
+                    user=message.receiver,
+                    notification_type='push',
+                    title='New Message',
+                    message_text=f'You received a message from {request.user.first_name} {request.user.last_name}',
+                    related_entity_type='message',
+                    related_entity_id=message.message_id
+                )
+            
             messages.success(request, 'Message sent successfully!')
             return redirect('tenant_dashboard' if request.user.user_type == 'tenant' else 'owner_dashboard')
     else:
-        form = MessageForm()
+        form = MessageForm(user=request.user)
     
     return render(request, 'messages/send_message.html', {'form': form})
 
@@ -843,3 +1144,16 @@ def delete_message(request, message_id):
         messages.error(request, 'Message not found.')
     
     return redirect('inbox')
+
+@login_required
+def view_notifications(request):
+    """View all notifications for the logged-in user"""
+    notifications = Notifications.objects.filter(user=request.user).order_by('-sent_at')
+    unread_count = notifications.filter(is_read=False).count()
+    
+    context = {
+        'notifications': notifications,
+        'unread_count': unread_count,
+    }
+    return render(request, 'notifications/view_notifications.html', context)
+

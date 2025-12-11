@@ -99,7 +99,7 @@
                         <div class="card-body">
                             <div class="d-flex justify-content-between">
                                 <div>
-                                    <h4>${{ total_paid|default:0 }}</h4>
+                                    <h4>BDT {{ total_paid|default:0 }}</h4>
                                     <p>Total Paid</p>
                                 </div>
                                 <i class="fas fa-dollar-sign fa-2x"></i>
@@ -138,18 +138,20 @@
                                         </td>
                                         <td>{{ booking.start_date }}</td>
                                         <td>{{ booking.end_date }}</td>
-                                        <td>${{ booking.total_amount }}</td>
+                                        <td>BDT {{ booking.total_amount }}</td>
                                         <td>
                                             <span class="badge bg-{% if booking.booking_status == 'confirmed' %}success{% elif booking.booking_status == 'pending' %}warning{% else %}danger{% endif %}">
                                                 {{ booking.booking_status|title }}
                                             </span>
                                         </td>
                                         <td>
-                                            {% if booking.booking_status == 'confirmed' %}
-                                                <a href="{% url 'make_payment' booking.booking_id %}" class="btn btn-primary btn-sm">
-                                                    <i class="fas fa-credit-card"></i> Make Payment
-                                                </a>
-                                            {% elif booking.booking_status == 'pending' %}
+                                            {% if booking.booking_status == 'confirmed' and booking.payment_due %}
+                                                    <a href="{% url 'make_payment' booking.booking_id %}" class="btn btn-primary btn-sm">
+                                                        <i class="fas fa-credit-card"></i> Make Payment
+                                                    </a>
+                                                {% elif booking.booking_status == 'confirmed' and not booking.payment_due %}
+                                                    <span class="text-muted">Next due: {{ booking.next_payment_due|date:"M d, Y" }}</span>
+                                                {% elif booking.booking_status == 'pending' %}
                                                 <form method="post" action="{% url 'cancel_booking' booking.booking_id %}" class="d-inline">
                                                     {% csrf_token %}
                                                     <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Are you sure you want to cancel this booking?')">
@@ -208,7 +210,7 @@
                                             <strong>{{ payment.booking.property.title }}</strong><br>
                                             <small class="text-muted">Booking #{{ payment.booking.booking_id }}</small>
                                         </td>
-                                        <td>${{ payment.amount }}</td>
+                                        <td>BDT {{ payment.amount }}</td>
                                         <td>{{ payment.payment_date|default:"Not paid yet" }}</td>
                                         <td>
                                             {% if payment.payment_method %}

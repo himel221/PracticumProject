@@ -24,4 +24,12 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include('rentalapp.urls')),
 ]
+ 
+
+# Serve media files during development
+from django.conf import settings as _settings
+from django.conf.urls.static import static as _static
+
+if _settings.DEBUG:
+    urlpatterns += _static(_settings.MEDIA_URL, document_root=_settings.MEDIA_ROOT)
 

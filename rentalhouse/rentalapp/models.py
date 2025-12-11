@@ -280,7 +280,6 @@ class Messages(models.Model):
     property = models.ForeignKey(Properties, on_delete=models.CASCADE, related_name='messages', blank=True, null=True)
     message_text = models.TextField()
     attachment_url = models.CharField(max_length=255, blank=True, null=True)
-    is_read = models.BooleanField(default=False)
     sent_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:

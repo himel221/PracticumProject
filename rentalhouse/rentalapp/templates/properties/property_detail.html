@@ -12,7 +12,11 @@
                     <div class="carousel-inner">
                         {% for image in images %}
                         <div class="carousel-item {% if forloop.first %}active{% endif %}">
-                            <img src="https://via.placeholder.com/800x400/ecf0f1/2c3e50?text=Property+Image+{{ forloop.counter }}" class="d-block w-100" alt="Property Image">
+                            {% if image.image_url %}
+                                <img src="{{ image.image_url.url }}" class="d-block w-100" alt="{{ image.caption|default:'Property Image' }}">
+                            {% else %}
+                                <img src="https://via.placeholder.com/800x400/ecf0f1/2c3e50?text=Property+Image+{{ forloop.counter }}" class="d-block w-100" alt="Property Image">
+                            {% endif %}
                         </div>
                         {% empty %}
                         <div class="carousel-item active">
@@ -132,14 +136,14 @@
                 </div>
                 <div class="card-body">
                     <div class="text-center mb-4">
-                        <h3 class="text-primary">${{ property.rent_amount }}</h3>
+                        <h3 class="text-primary">BDT {{ property.rent_amount }}</h3>
                         <p class="text-muted">per month</p>
                     </div>
 
                     <div class="property-info mb-4">
                         <div class="info-item d-flex justify-content-between mb-2">
                             <span>Security Deposit:</span>
-                            <strong>${{ property.security_deposit|default:property.rent_amount }}</strong>
+                            <strong>BDT {{ property.security_deposit|default:property.rent_amount }}</strong>
                         </div>
                         <div class="info-item d-flex justify-content-between mb-2">
                             <span>Available From:</span>

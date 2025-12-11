@@ -42,6 +42,9 @@ urlpatterns = [
     # Add this to your urlpatterns
 path('messages/delete/<int:message_id>/', views.delete_message, name='delete_message'),
     
+    # Notification URLs
+    path('notifications/', views.view_notifications, name='view_notifications'),
+    
     # Booking management URLs
     path('booking/confirm/<int:booking_id>/', views.confirm_booking, name='confirm_booking'),
     path('booking/cancel/<int:booking_id>/', views.cancel_booking, name='cancel_booking'),

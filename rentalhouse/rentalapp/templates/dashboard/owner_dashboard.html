@@ -94,7 +94,7 @@
                         <div class="card-body">
                             <div class="d-flex justify-content-between">
                                 <div>
-                                    <h4>${{ total_earnings }}</h4>
+                                    <h4>BDT {{ total_earnings }}</h4>
                                     <p>Total Earnings</p>
                                 </div>
                                 <i class="fas fa-dollar-sign fa-2x"></i>
@@ -129,7 +129,7 @@
                                                 {{ property.status|title }}
                                             </span>
                                         </div>
-                                        <strong class="text-primary">${{ property.rent_amount }}/month</strong>
+                                        <strong class="text-primary">BDT {{ property.rent_amount }}/month</strong>
                                     </div>
                                 </div>
                             </div>
@@ -172,7 +172,7 @@
                                         <small class="text-muted">{{ booking.tenant.user.email }}</small>
                                     </td>
                                     <td>{{ booking.start_date }} to {{ booking.end_date }}</td>
-                                    <td>${{ booking.total_amount }}</td>
+                                    <td>BDT {{ booking.total_amount }}</td>
                                     <td>{{ booking.created_at|date:"M d, Y" }}</td>
                                     <td>
                                         <div class="btn-group">
@@ -231,7 +231,7 @@
                                             <small class="text-muted">{{ booking.tenant.user.email }}</small>
                                         </td>
                                         <td>{{ booking.start_date }} to {{ booking.end_date }}</td>
-                                        <td>${{ booking.total_amount }}</td>
+                                        <td>BDT {{ booking.total_amount }}</td>
                                         <td>
                                             <span class="badge bg-{% if booking.booking_status == 'confirmed' %}success{% elif booking.booking_status == 'pending' %}warning{% else %}danger{% endif %}">
                                                 {{ booking.booking_status|title }}

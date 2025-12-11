@@ -75,7 +75,7 @@
                                         <td>{{ booking.property.title }}</td>
                                         <td>{{ booking.tenant.user.get_full_name }}</td>
                                         <td>{{ booking.start_date }} to {{ booking.end_date }}</td>
-                                        <td>${{ booking.total_amount }}</td>
+                                        <td>BDT {{ booking.total_amount }}</td>
                                         <td>
                                             <span class="badge bg-{% if booking.booking_status == 'confirmed' %}success{% elif booking.booking_status == 'pending' %}warning{% else %}danger{% endif %}">
                                                 {{ booking.booking_status|title }}

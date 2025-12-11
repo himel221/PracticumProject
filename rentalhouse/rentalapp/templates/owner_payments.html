@@ -83,7 +83,7 @@
                                         <td>#{{ payment.booking.booking_id }}</td>
                                         <td>{{ payment.booking.property.title }}</td>
                                         <td>{{ payment.tenant.user.get_full_name }}</td>
-                                        <td>${{ payment.amount }}</td>
+                                        <td>BDT {{ payment.amount }}</td>
                                         <td>{{ payment.payment_date|default:'-' }}</td>
                                         <td>
                                             <div class="d-flex align-items-center gap-2">
@@ -91,10 +91,15 @@
                                                     {{ payment.payment_status|title }}
                                                 </span>
                                                 {% if payment.payment_status != 'completed' %}
-                                                    <form method="post" action="{% url 'confirm_payment' payment.payment_id %}">
-                                                        {% csrf_token %}
-                                                        <button type="submit" class="btn btn-sm btn-success">Mark Received</button>
-                                                    </form>
+                                                    {% comment %}Show "Mark Received" only after tenant has submitted payment details{% endcomment %}
+                                                    {% if payment.payment_method or payment.transaction_id or payment.receipt_url %}
+                                                        <form method="post" action="{% url 'confirm_payment' payment.payment_id %}">
+                                                            {% csrf_token %}
+                                                            <button type="submit" class="btn btn-sm btn-success">Mark Received</button>
+                                                        </form>
+                                                    {% else %}
+                                                        <small class="text-muted">Awaiting tenant payment</small>
+                                                    {% endif %}
                                                 {% endif %}
                                             </div>
                                         </td>

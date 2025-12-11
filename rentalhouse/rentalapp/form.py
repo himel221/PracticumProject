@@ -320,12 +320,22 @@ class MessageForm(forms.ModelForm):
         }
     
     def __init__(self, *args, **kwargs):
+        # Accept an optional `user` kwarg to customize receiver choices
+        user = kwargs.pop('user', None)
         super().__init__(*args, **kwargs)
-        # Filter users to only show tenants and owners
-        self.fields['receiver'].queryset = Users.objects.exclude(
-            user_type='admin'
-        )
-        
+
+        # Base recipient queryset: exclude admins
+        qs = Users.objects.exclude(user_type='admin')
+        # If we have the current user, exclude self and limit by opposite type
+        if user is not None:
+            qs = qs.exclude(pk=user.pk)
+            if getattr(user, 'user_type', None) == 'tenant':
+                qs = qs.filter(user_type='owner')
+            elif getattr(user, 'user_type', None) == 'owner':
+                qs = qs.filter(user_type='tenant')
+
+        self.fields['receiver'].queryset = qs
+
         # Filter properties to only show available ones
         self.fields['property'].queryset = Properties.objects.filter(
             status='available'
