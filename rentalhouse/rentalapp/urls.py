@@ -27,6 +27,7 @@ urlpatterns = [
     
     # Payment URLs
     path('payment/<int:booking_id>/', views.make_payment, name='make_payment'),
+    path('payment/<int:booking_id>/pay/<int:payment_id>/', views.make_payment, name='make_payment_with_id'),
     
     # Complaint URLs
     path('complaints/submit/', views.submit_complaint, name='submit_complaint'),
@@ -44,6 +45,7 @@ path('messages/delete/<int:message_id>/', views.delete_message, name='delete_mes
     
     # Notification URLs
     path('notifications/', views.view_notifications, name='view_notifications'),
+    path('notifications/mark/<int:notification_id>/', views.mark_notification_read, name='mark_notification_read'),
     
     # Booking management URLs
     path('booking/confirm/<int:booking_id>/', views.confirm_booking, name='confirm_booking'),

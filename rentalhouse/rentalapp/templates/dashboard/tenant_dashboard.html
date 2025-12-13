@@ -223,6 +223,13 @@
                                             <span class="badge bg-{% if payment.payment_status == 'completed' %}success{% elif payment.payment_status == 'pending' %}warning{% else %}danger{% endif %}">
                                                 {{ payment.payment_status|title }}
                                             </span>
+                                            {% if payment.payment_status == 'pending' and payment.due_date <= today %}
+                                                <div class="mt-2">
+                                                    <a href="{% url 'make_payment_with_id' payment.booking.booking_id payment.payment_id %}" class="btn btn-primary btn-sm">
+                                                        <i class="fas fa-credit-card"></i> Make Payment
+                                                    </a>
+                                                </div>
+                                            {% endif %}
                                         </td>
                                     </tr>
                                     {% endfor %}

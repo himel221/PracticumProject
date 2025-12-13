@@ -117,6 +117,13 @@
                             {% for property in properties|slice:":3" %}
                             <div class="col-md-4 mb-3">
                                 <div class="card h-100">
+                                    {% with imgs=property.images.all %}
+                                    {% if imgs|length > 0 %}
+                                        <img src="{{ imgs.0.image_url.url }}" class="card-img-top" alt="{{ property.title }}" style="height:180px;object-fit:cover;">
+                                        <small class="text-muted d-block mt-1">Image URL: {{ imgs.0.image_url.url }}</small>
+                                    {% else %}
+                                        <img src="https://via.placeholder.com/400x180/ecf0f1/2c3e50?text=Property+{{ property.property_id }}" class="card-img-top" alt="{{ property.title }}" style="height:180px;object-fit:cover;">
+                                    {% endif %}
                                     <div class="card-body">
                                         <h6 class="card-title">{{ property.title }}</h6>
                                         <p class="card-text text-muted small">
@@ -133,6 +140,7 @@
                                     </div>
                                 </div>
                             </div>
+                            {% endwith %}
                             {% endfor %}
                         </div>
                     {% else %}

@@ -30,7 +30,13 @@
             {% for property in featured_properties %}
             <div class="col-lg-4 col-md-6 mb-4">
                 <div class="card property-card h-100">
-                    <img src="https://via.placeholder.com/400x300/ecf0f1/2c3e50?text=Property+{{ property.property_id }}" class="card-img-top" alt="{{ property.title }}">
+                    {% with imgs=property.images.all %}
+                        {% if imgs|length > 0 %}
+                            <img src="{{ imgs.0.image_url.url }}" class="card-img-top" alt="{{ property.title }}">
+                        {% else %}
+                            <img src="https://via.placeholder.com/400x300/ecf0f1/2c3e50?text=Property+{{ property.property_id }}" class="card-img-top" alt="{{ property.title }}">
+                        {% endif %}
+                    {% endwith %}
                     <div class="card-body">
                         <h5 class="card-title">{{ property.title }}</h5>
                         <p class="card-text text-muted">
