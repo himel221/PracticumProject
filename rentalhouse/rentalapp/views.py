@@ -160,6 +160,7 @@ def tenant_dashboard(request):
         'complaints_in_progress': complaints_in_progress,
         'complaints_resolved': complaints_resolved,
         'total_paid': total_paid,
+        'today': today,
     }
     return render(request, 'dashboard/tenant_dashboard.html', context)
 
@@ -298,8 +299,35 @@ def add_property(request):
             property_obj = form.save(commit=False)
             property_obj.owner = owner
             property_obj.save()
+            # Handle uploaded images: main_image and additional_images
+            try:
+                main_image = request.FILES.get('main_image')
+                if main_image:
+                    PropertyImages.objects.create(
+                        property=property_obj,
+                        image_url=main_image,
+                        caption='Main image',
+                        is_primary=True
+                    )
+
+                additional = request.FILES.getlist('additional_images')
+                for img in additional:
+                    # skip if same as main
+                    if main_image and getattr(img, 'name', None) == getattr(main_image, 'name', None):
+                        continue
+                    PropertyImages.objects.create(
+                        property=property_obj,
+                        image_url=img,
+                        caption='Additional image',
+                        is_primary=False
+                    )
+            except Exception as e:
+                # don't block property creation if images fail; log and continue
+                print(f"Error saving property images: {e}")
+
             messages.success(request, 'Property added successfully!')
-            return redirect('property_list')
+            # After adding a property, show it on the owner dashboard
+            return redirect('owner_dashboard')
     else:
         form = PropertyForm()
     
@@ -499,45 +527,29 @@ def confirm_booking(request, booking_id):
             booking.property.status = 'occupied'
             booking.property.save()
 
-            # Create initial pending payment depending on booking length:
-            # - For short bookings (<30 days): create one prorated pending payment due at or before start_date
-            # - For longer bookings: schedule the first monthly pending payment one calendar month after start_date
+            # Create a single initial pending payment when booking is confirmed.
             try:
-                import calendar
                 from django.utils import timezone
 
                 today = timezone.now().date()
+                # Only create an initial payment if none exist yet for this booking
                 if not Payments.objects.filter(booking=booking).exists():
                     total_days = (booking.end_date - booking.start_date).days
                     if total_days < 30:
                         per_day = float(booking.property.rent_amount) / 30.0
                         amount = round(per_day * max(1, total_days), 2)
-                        due_date = booking.start_date if booking.start_date >= today else today
-                        Payments.objects.create(
-                            booking=booking,
-                            tenant=booking.tenant,
-                            owner=booking.property.owner,
-                            amount=amount,
-                            due_date=due_date,
-                            payment_status='pending'
-                        )
                     else:
-                        # compute start_date + 1 calendar month
-                        sd = booking.start_date
-                        month = sd.month + 1
-                        year = sd.year + (month - 1) // 12
-                        month = (month - 1) % 12 + 1
-                        day = min(sd.day, calendar.monthrange(year, month)[1])
-                        first_due = sd.replace(year=year, month=month, day=day)
-                        if first_due <= booking.end_date:
-                            Payments.objects.create(
-                                booking=booking,
-                                tenant=booking.tenant,
-                                owner=booking.property.owner,
-                                amount=float(booking.property.rent_amount),
-                                due_date=first_due,
-                                payment_status='pending'
-                            )
+                        amount = float(booking.property.rent_amount)
+
+                    due_date = booking.start_date if booking.start_date >= today else today
+                    Payments.objects.create(
+                        booking=booking,
+                        tenant=booking.tenant,
+                        owner=booking.property.owner,
+                        amount=amount,
+                        due_date=due_date,
+                        payment_status='pending'
+                    )
             except Exception:
                 pass
             
@@ -803,7 +815,7 @@ def export_payments_pdf(request):
         return redirect('owner_payments')
 
 @login_required
-def make_payment(request, booking_id):
+def make_payment(request, booking_id, payment_id=None):
     if request.user.user_type != 'tenant':
         messages.error(request, 'Access denied.')
         return redirect('home')
@@ -813,8 +825,17 @@ def make_payment(request, booking_id):
     owner = booking.property.owner
     
     if request.method == 'POST':
-        # Prefer updating an existing pending payment
-        pending_payment = Payments.objects.filter(booking=booking, payment_status='pending').order_by('due_date').first()
+        # If a specific payment_id was provided, update that payment
+        pending_payment = None
+        if payment_id:
+            try:
+                pending_payment = Payments.objects.get(pk=payment_id, booking=booking, tenant=tenant)
+            except Payments.DoesNotExist:
+                pending_payment = None
+
+        if not pending_payment:
+            pending_payment = Payments.objects.filter(booking=booking, payment_status='pending').order_by('due_date').first()
+
         if pending_payment:
             form = PaymentForm(request.POST, instance=pending_payment)
         else:
@@ -830,7 +851,7 @@ def make_payment(request, booking_id):
             # Do not record payment_date yet; owner will confirm and set payment_date
             payment.payment_date = None
             payment.save()
-            
+
             # Create notification for owner (tenant submitted payment) -- skip actor
             if owner and owner.user != request.user:
                 create_notification(
@@ -845,8 +866,17 @@ def make_payment(request, booking_id):
             messages.success(request, 'Payment submitted and awaiting owner confirmation.')
             return redirect('tenant_dashboard')
     else:
-        # Try to use existing pending payment for this booking
-        pending_payment = Payments.objects.filter(booking=booking, payment_status='pending').order_by('due_date').first()
+        # Try to use existing pending payment for this booking (or the specific payment if provided)
+        pending_payment = None
+        if payment_id:
+            try:
+                pending_payment = Payments.objects.get(pk=payment_id, booking=booking, tenant=tenant)
+            except Payments.DoesNotExist:
+                pending_payment = None
+
+        if not pending_payment:
+            pending_payment = Payments.objects.filter(booking=booking, payment_status='pending').order_by('due_date').first()
+
         if pending_payment:
             initial_data = {'amount': pending_payment.amount, 'due_date': pending_payment.due_date}
             form = PaymentForm(initial=initial_data)
@@ -1156,4 +1186,32 @@ def view_notifications(request):
         'unread_count': unread_count,
     }
     return render(request, 'notifications/view_notifications.html', context)
+
+
+@login_required
+def mark_notification_read(request, notification_id):
+    """Mark a specific notification as read and redirect back to notifications."""
+    try:
+        notification = Notifications.objects.get(notification_id=notification_id, user=request.user)
+    except Notifications.DoesNotExist:
+        messages.error(request, 'Notification not found.')
+        return redirect('view_notifications')
+
+    if not notification.is_read:
+        notification.is_read = True
+        notification.save()
+
+    # Try to redirect to related entity if provided (basic mapping), otherwise back to notifications
+    rel_type = (notification.related_entity_type or '').lower() if notification.related_entity_type else ''
+    rel_id = notification.related_entity_id
+
+    if rel_type == 'message' and rel_id:
+        return redirect('inbox')
+    if rel_type == 'booking' and rel_id:
+        return redirect('tenant_dashboard' if request.user.user_type == 'tenant' else 'owner_dashboard')
+    if rel_type == 'payment' and rel_id:
+        return redirect('tenant_dashboard' if request.user.user_type == 'tenant' else 'owner_payments')
+
+    # Fallback
+    return redirect('view_notifications')
 

@@ -35,6 +35,9 @@ class PaymentMethod(models.TextChoices):
     CARD = 'card', 'Credit/Debit Card'
     BANK_TRANSFER = 'bank_transfer', 'Bank Transfer'
     DIGITAL_WALLET = 'digital_wallet', 'Digital Wallet'
+    BKASH = 'bkash', 'bKash'
+    NAGAD = 'nagad', 'Nagad'
+    ROCKET = 'rocket', 'Rocket'
     CASH = 'cash', 'Cash'
 
 class PaymentStatus(models.TextChoices):

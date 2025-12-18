@@ -188,6 +188,41 @@
                     <small class="text-muted">Go to bookings above to make payments</small>
                     {% endif %}
                 </div>
+                <!-- Send Payment Box: quick tenant payment form -->
+                <div class="card-body border-top bg-light">
+                    <form id="quick-send-payment" method="post">
+                        {% csrf_token %}
+                        <div class="row align-items-end">
+                            <div class="col-md-5">
+                                <label class="form-label">Select Booking</label>
+                                <select id="q_booking" class="form-select">
+                                    <option value="">Choose a booking...</option>
+                                    {% for b in bookings %}
+                                        {% if b.booking_status == 'confirmed' %}
+                                            <option value="{{ b.booking_id }}" data-amount="{{ b.total_amount }}">#{{ b.booking_id }} — {{ b.property.title }} — BDT {{ b.total_amount }}</option>
+                                        {% endif %}
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Amount (BDT)</label>
+                                <input id="q_amount" name="amount" type="number" step="0.01" class="form-control" placeholder="Amount">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Payment Method</label>
+                                <select id="q_method" name="payment_method" class="form-select">
+                                    <option value="card">Credit/Debit Card</option>
+                                    <option value="bank_transfer">Bank Transfer</option>
+                                    <option value="digital_wallet">Digital Wallet</option>
+                                    <option value="cash">Cash</option>
+                                </select>
+                            </div>
+                            <div class="col-md-2 text-end">
+                                <button id="q_send" type="submit" class="btn btn-success">Send Payment</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
                 <div class="card-body">
                     {% if payments %}
                         <div class="table-responsive">
@@ -335,6 +370,67 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
             }
         });
+    });
+});
+</script>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Quick Send Payment: build make_payment URL and submit
+    const quickForm = document.getElementById('quick-send-payment');
+    const bookingSelect = document.getElementById('q_booking');
+    const amountInput = document.getElementById('q_amount');
+    const methodInput = document.getElementById('q_method');
+
+    // base URL with placeholder 0 -> /payment/0/
+    const baseUrl = "{% url 'make_payment' 0 %}";
+
+    // auto-fill amount when booking selected
+    bookingSelect.addEventListener('change', function() {
+        const opt = this.options[this.selectedIndex];
+        if (opt && opt.dataset && opt.dataset.amount) {
+            amountInput.value = opt.dataset.amount;
+        }
+    });
+
+    quickForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const bookingId = bookingSelect.value;
+        if (!bookingId) {
+            alert('Please select a booking to pay for.');
+            return;
+        }
+        // build action URL
+        const actionUrl = baseUrl.replace('/0/', '/' + bookingId + '/');
+
+        // create a temporary form to POST to the make_payment URL (keeps page structure)
+        const tempForm = document.createElement('form');
+        tempForm.method = 'post';
+        tempForm.action = actionUrl;
+        // csrf
+        const csrfToken = document.querySelector('input[name="csrfmiddlewaretoken"]').value;
+        const csrfInput = document.createElement('input');
+        csrfInput.type = 'hidden';
+        csrfInput.name = 'csrfmiddlewaretoken';
+        csrfInput.value = csrfToken;
+        tempForm.appendChild(csrfInput);
+
+        // amount
+        const a = document.createElement('input');
+        a.type = 'hidden';
+        a.name = 'amount';
+        a.value = amountInput.value || '';
+        tempForm.appendChild(a);
+
+        // payment_method
+        const m = document.createElement('input');
+        m.type = 'hidden';
+        m.name = 'payment_method';
+        m.value = methodInput.value;
+        tempForm.appendChild(m);
+
+        document.body.appendChild(tempForm);
+        tempForm.submit();
     });
 });
 </script>
